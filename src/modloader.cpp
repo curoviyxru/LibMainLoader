@@ -162,6 +162,7 @@ MAIN_LOCAL void modloader::preload(JNIEnv* env) noexcept {
     LOG_WARN("preload: Failed to get paths! Stopping load.");
     return;
   }
+  LOG_DEBUG("Found: files: %s, external: %s", pathContainer->filesDir.c_str(), pathContainer->externalDir.c_str());
 
   auto result = findAndOpenModloader(*pathContainer);
   if (!result) {
