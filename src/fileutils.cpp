@@ -3,6 +3,7 @@
 #include <ctype.h>
 #include <jni.h>
 
+#include <array>
 #include <cstring>
 #include <filesystem>
 #include <string_view>
@@ -30,14 +31,14 @@ char* trimWhitespace(char* str) {
 #ifndef NO_SPECIFIC_FAIL_LOGS
 #define ERR_CHECK(val, ...)                                                \
   auto val = __VA_ARGS__;                                                  \
-  if (val == nullptr) {                                                    \
+  if (val == nullptr || env->ExceptionCheck()) {                           \
     LOG_ERROR("Failed: " __FILE__ ":" STRIFY(__LINE__) ": " #__VA_ARGS__); \
     return {};                                                             \
   }
 #else
 #define ERR_CHECK(val, ...)                              \
   auto val = __VA_ARGS__;                                \
-  if (val == nullptr) {                                  \
+  if (val == nullptr || env->ExceptionCheck()) {         \
     LOG_ERROR("Failed: " __FILE__ ":" STRIFY(__LINE__)); \
     return {};                                           \
   }
@@ -48,6 +49,39 @@ jobject getActivityFromUnityPlayerInternal(JNIEnv* env) {
   ERR_CHECK(actField, env->GetStaticFieldID(clazz, "currentActivity", "Landroid/app/Activity;"));
   ERR_CHECK(result, env->GetStaticObjectField(clazz, actField));
   return result;
+}
+bool ensurePermsWithUnity(JNIEnv* env, jobject activity, [[maybe_unused]] std::string_view application_id) {
+  ERR_CHECK(clazz, env->FindClass("com/unity3d/player/UnityPermissions"));
+  ERR_CHECK(requestUserPerms, env->GetStaticMethodID(clazz, "requestUserPermissions",
+                                                     "(Landroid/app/Activity;[Ljava/lang/String;Lcom/unity3d/player/"
+                                                     "IPermissionRequestCallbacks;)V"));
+  ERR_CHECK(waitperm_class, env->FindClass("com/unity3d/player/UnityPermissions$ModalWaitForPermissionResponse"));
+  ERR_CHECK(string_class, env->FindClass("java/lang/String"));
+  ERR_CHECK(waitperm_ctor, env->GetMethodID(waitperm_class, "<init>", "()V"));
+  ERR_CHECK(waitperm_wait, env->GetMethodID(waitperm_class, "waitForResponse", "()V"));
+
+  // The set of permissions to request broadly
+  // TODO: Attempt to see if we can create application_id based permissions here as done in ensurePermsWithAppId
+  constexpr std::array kPerms = {
+      "android.permission.WRITE_EXTERNAL_STORAGE",
+      "android.permission.MANAGE_EXTERNAL_STORAGE",
+  };
+
+  // First, create an instance of ModalWaitForPermissionResponse
+  ERR_CHECK(waitperm, env->NewObject(waitperm_class, waitperm_ctor));
+  ERR_CHECK(perms_arr, env->NewObjectArray(kPerms.size(), string_class, nullptr));
+  for (auto i = 0ULL; i < kPerms.size(); i++) {
+    ERR_CHECK(jstr, env->NewStringUTF(kPerms[i]));
+    env->SetObjectArrayElement(perms_arr, i, jstr);
+  }
+  // Call requestUserPermissions on the activity, with the permissions array and waitperm instance
+  env->CallStaticVoidMethod(clazz, requestUserPerms, activity, perms_arr, waitperm);
+  if (env->ExceptionCheck()) return false;
+  // Now wait for the response
+  // TODO: This is actually a blocking call. Ideally, we fire it off and continue and install ourselves as a callback.
+  // That way, we would get called when the perm dialog closes but won't potentially cause loading to hang.
+  env->CallVoidMethod(waitperm, waitperm_wait);
+  return !env->ExceptionCheck();
 }
 bool ensurePermsWithAppId(JNIEnv* env, jobject activity, std::string_view application_id) {
   ERR_CHECK(clazz, env->FindClass("com/unity3d/player/UnityPlayerActivity"));
@@ -161,12 +195,17 @@ jobject fileutils::getActivityFromUnityPlayer(JNIEnv* env) {
 }
 
 bool fileutils::ensurePerms(JNIEnv* env, jobject activity, std::string_view application_id) {
+  // First, try to use unity. Failing that, use a fallback
+  if (ensurePermsWithUnity(env, activity, application_id)) return true;
+  if (env->ExceptionCheck()) env->ExceptionDescribe();
+  LOG_ERROR("libmain.ensurePermsWithUnity failed! See 'System.err' tag.");
+  env->ExceptionClear();
   // TODO: The correct thing to do would be to listen to the completion event and resume modloading when that happens.
   // Instead, we actually sleep the thread, which is potentially problematic.
   if (ensurePermsWithAppId(env, activity, application_id)) return true;
 
   if (env->ExceptionCheck()) env->ExceptionDescribe();
-  LOG_ERROR("libmain.ensurePerms failed! See 'System.err' tag.");
+  LOG_ERROR("libmain.ensurePermsWithAppId failed! See 'System.err' tag.");
   env->ExceptionClear();
   return false;
 }
