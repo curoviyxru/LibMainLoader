@@ -91,7 +91,8 @@ bool ensurePermsWithAppId(JNIEnv* env, jobject activity, std::string_view applic
   ERR_CHECK(uriClass, env->FindClass("android/net/Uri"));
   ERR_CHECK(uriParse, env->GetStaticMethodID(uriClass, "parse", "(Ljava/lang/String;)Landroid/net/Uri;"));
   ERR_CHECK(envClass, env->FindClass("android/os/Environment"));
-  ERR_CHECK(isExternalMethod, env->GetStaticMethodID(envClass, "isExternalStorageManager", "()Z"));
+  //TODO Check Android API level
+  //ERR_CHECK(isExternalMethod, env->GetStaticMethodID(envClass, "isExternalStorageManager", "()Z"));
 
   using namespace std::chrono_literals;
   // We loop the attempt to display permissions
@@ -103,14 +104,14 @@ bool ensurePermsWithAppId(JNIEnv* env, jobject activity, std::string_view applic
   constexpr static auto kDelay = 5000ms;
 
   for (int i = 0; i < kNumTries; i++) {
-    auto result = env->CallStaticBooleanMethod(envClass, isExternalMethod);
-    if (env->ExceptionCheck()) {
-      LOG_ERROR("Failed: to call Environment.getIsExternalStorageManager()");
-      return false;
-    }
-    LOG_INFO("Fetch of isExternalStorageManager(): %d", result);
+    //auto result = env->CallStaticBooleanMethod(envClass, isExternalMethod);
+    //if (env->ExceptionCheck()) {
+    //  LOG_ERROR("Failed: to call Environment.getIsExternalStorageManager()");
+    //  return false;
+    //}
+    //LOG_INFO("Fetch of isExternalStorageManager(): %d", result);
     // If we already granted permissions, good to go
-    if (result) return true;
+    // if (result) return true;
     // Otherwise, need to display
     LOG_DEBUG("Attempt to show intent for MANAGE APP ALL FILES ACCESS PERMISSION:");
     // We pay the penalty of reconstructing these every iteration, as we don't expect to need to do so.
